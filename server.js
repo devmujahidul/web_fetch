@@ -9,6 +9,54 @@ const DATA_URL = 'https://raw.githubusercontent.com/devmujahidul/Auto_Fetch/refs
 
 app.use(cors());
 
+// Helper function to fetch with VLC headers
+async function fetchWithVLCHeaders(url) {
+    return await axios.get(url, {
+        headers: {
+            'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',
+            'Accept': '*/*',
+            'Connection': 'keep-alive'
+        },
+        responseType: 'text'
+    });
+}
+
+// Helper function to rewrite M3U8 content
+function rewriteM3U8(content, baseUrl, proxyPath) {
+    const lines = content.split('\n');
+    const newLines = lines.map(line => {
+        const trimmedLine = line.trim();
+        
+        // Skip empty lines and comments
+        if (!trimmedLine || trimmedLine.startsWith('#')) return line;
+        
+        try {
+            // Convert relative/absolute URLs to absolute URLs
+            const absoluteUrl = new URL(trimmedLine, baseUrl).toString();
+            
+            // If it's another M3U8 file, proxy it through our server
+            if (trimmedLine.includes('.m3u8')) {
+                const encodedUrl = encodeURIComponent(absoluteUrl);
+                return `${proxyPath}/proxy-m3u8?url=${encodedUrl}`;
+            }
+            
+            // For .ts files, proxy them too to avoid CORS issues
+            if (trimmedLine.includes('.ts')) {
+                const encodedUrl = encodeURIComponent(absoluteUrl);
+                return `${proxyPath}/proxy-segment?url=${encodedUrl}`;
+            }
+            
+            // Return absolute URL for other files
+            return absoluteUrl;
+        } catch (e) {
+            return line;
+        }
+    });
+    
+    return newLines.join('\n');
+}
+
+// Main endpoint - returns the master playlist
 app.get('/get-stream/:id', async (req, res) => {
     const requestedId = req.params.id;
 
@@ -22,35 +70,21 @@ app.get('/get-stream/:id', async (req, res) => {
         const targetUrl = channel.url;
         const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
 
-        // 2. Fetch stream mimicking VLC Player
-        // VLC usually sends very few headers. Sending 'Referer' often causes blocks for these types of tokens.
-        const streamResponse = await axios.get(targetUrl, {
-            headers: {
-                'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18', // Pretend to be VLC
-                'Accept': '*/*',
-                'Connection': 'keep-alive'
-            }
-        });
+        // 2. Fetch master playlist
+        const streamResponse = await fetchWithVLCHeaders(targetUrl);
 
-        // 3. Rewrite M3U8
-        const m3u8Content = streamResponse.data;
-        const lines = m3u8Content.split('\n');
-        const newLines = lines.map(line => {
-            if (!line.trim() || line.trim().startsWith('#')) return line;
-            try {
-                // Convert relative paths to absolute
-                return new URL(line, baseUrl).toString();
-            } catch (e) {
-                return line;
-            }
-        });
-
-        const finalM3u8 = newLines.join('\n');
+        // 3. Rewrite M3U8 to proxy all requests through our server
+        const protocol = req.protocol;
+        const host = req.get('host');
+        const proxyPath = `${protocol}://${host}`;
+        
+        const finalM3u8 = rewriteM3U8(streamResponse.data, baseUrl, proxyPath);
 
         // 4. Send response
         res.set({
             'Content-Type': 'application/vnd.apple.mpegurl',
-            'Access-Control-Allow-Origin': '*'
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'no-cache'
         });
         
         res.send(finalM3u8);
@@ -58,12 +92,84 @@ app.get('/get-stream/:id', async (req, res) => {
     } catch (error) {
         console.error("Proxy Error:", error.response ? error.response.status : error.message);
         
-        // If we get a 403, it confirms the token is rejected
         if (error.response && error.response.status === 403) {
             res.status(403).send("Access Denied: The token in the JSON file is likely IP-locked to the GitHub server and cannot be used on this network.");
         } else {
             res.status(500).send("Error fetching stream");
         }
+    }
+});
+
+// Proxy endpoint for nested M3U8 files
+app.get('/proxy-m3u8', async (req, res) => {
+    const targetUrl = req.query.url;
+    
+    if (!targetUrl) {
+        return res.status(400).send("Missing URL parameter");
+    }
+
+    try {
+        const decodedUrl = decodeURIComponent(targetUrl);
+        const baseUrl = decodedUrl.substring(0, decodedUrl.lastIndexOf('/') + 1);
+        
+        // Fetch the nested M3U8
+        const streamResponse = await fetchWithVLCHeaders(decodedUrl);
+        
+        // Rewrite URLs in this M3U8 too
+        const protocol = req.protocol;
+        const host = req.get('host');
+        const proxyPath = `${protocol}://${host}`;
+        
+        const finalM3u8 = rewriteM3U8(streamResponse.data, baseUrl, proxyPath);
+        
+        res.set({
+            'Content-Type': 'application/vnd.apple.mpegurl',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'no-cache'
+        });
+        
+        res.send(finalM3u8);
+        
+    } catch (error) {
+        console.error("M3U8 Proxy Error:", error.message);
+        res.status(500).send("Error fetching M3U8");
+    }
+});
+
+// Proxy endpoint for .ts segments
+app.get('/proxy-segment', async (req, res) => {
+    const targetUrl = req.query.url;
+    
+    if (!targetUrl) {
+        return res.status(400).send("Missing URL parameter");
+    }
+
+    try {
+        const decodedUrl = decodeURIComponent(targetUrl);
+        
+        // Fetch the .ts segment
+        const segmentResponse = await axios.get(decodedUrl, {
+            headers: {
+                'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',
+                'Accept': '*/*',
+                'Connection': 'keep-alive'
+            },
+            responseType: 'stream'
+        });
+        
+        // Set appropriate headers
+        res.set({
+            'Content-Type': 'video/mp2t',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'public, max-age=3600'
+        });
+        
+        // Pipe the stream directly to response
+        segmentResponse.data.pipe(res);
+        
+    } catch (error) {
+        console.error("Segment Proxy Error:", error.message);
+        res.status(500).send("Error fetching segment");
     }
 });
 
