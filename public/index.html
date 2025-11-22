@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HLS Stream Test Player</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        h1 {
+            text-align: center;
+            color: #4CAF50;
+        }
+        .container {
+            background: #2a2a2a;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        video {
+            width: 100%;
+            max-width: 800px;
+            display: block;
+            margin: 20px auto;
+            background: #000;
+            border-radius: 8px;
+        }
+        .input-group {
+            margin: 20px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #4CAF50;
+            border-radius: 5px;
+            font-size: 14px;
+            background: #3a3a3a;
+            color: #fff;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 12px;
+            margin: 15px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .url-display {
+            background: #3a3a3a;
+            padding: 10px;
+            border-radius: 5px;
+            word-break: break-all;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 HLS Stream Test Player</h1>
+        
+        <div class="input-group">
+            <label for="serverUrl">Server URL:</label>
+            <input type="text" id="serverUrl" placeholder="Server URL will be auto-detected" readonly style="background: #2a2a2a; cursor: not-allowed;">
+        </div>
+        
+        <div class="input-group">
+            <label for="channelId">Channel ID:</label>
+            <input type="text" id="channelId" placeholder="e.g., 20714fd4-dc3c-46d6-924f-3038d61f027c" value="20714fd4-dc3c-46d6-924f-3038d61f027c">
+        </div>
+        
+        <div class="controls">
+            <button onclick="loadStream()">Load Stream</button>
+            <button onclick="pauseStream()">Pause</button>
+            <button onclick="resumeStream()">Play</button>
+        </div>
+        
+        <div id="status"></div>
+        <div id="urlDisplay"></div>
+        
+        <video id="video" controls></video>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const statusDiv = document.getElementById('status');
+        const urlDiv = document.getElementById('urlDisplay');
+        let hls;
+
+        function showStatus(message, type) {
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+        }
+
+        function loadStream() {
+            // Auto-detect server URL (use current page's origin)
+            const serverUrl = window.location.origin;
+            document.getElementById('serverUrl').value = serverUrl;
+            
+            const channelId = document.getElementById('channelId').value.trim();
+            
+            if (!channelId) {
+                showStatus('Please enter a channel ID', 'error');
+                return;
+            }
+
+            // Remove trailing slash from server URL
+            const cleanServerUrl = serverUrl.replace(/\/$/, '');
+            const streamUrl = `${cleanServerUrl}/get-stream/${channelId}`;
+            
+            urlDiv.innerHTML = `<strong>Stream URL:</strong><br><div class="url-display">${streamUrl}</div>`;
+            
+            showStatus('Loading stream...', 'info');
+
+            // Clean up previous instance
+            if (hls) {
+                hls.destroy();
+            }
+
+            if (Hls.isSupported()) {
+                hls = new Hls({
+                    debug: true,
+                    enableWorker: true,
+                    lowLatencyMode: false,
+                    xhrSetup: function(xhr, url) {
+                        // Add any custom headers if needed
+                        xhr.withCredentials = false;
+                    }
+                });
+
+                hls.loadSource(streamUrl);
+                hls.attachMedia(video);
+
+                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                    showStatus('✅ Stream loaded successfully! Click play on the video.', 'success');
+                    video.play().catch(e => {
+                        showStatus('Stream ready. Click the play button to start.', 'info');
+                    });
+                });
+
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    if (data.fatal) {
+                        switch(data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                showStatus('❌ Network error: ' + data.details, 'error');
+                                console.error('Network error:', data);
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                showStatus('❌ Media error: ' + data.details, 'error');
+                                console.error('Media error:', data);
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                showStatus('❌ Fatal error: ' + data.details, 'error');
+                                console.error('Fatal error:', data);
+                                hls.destroy();
+                                break;
+                        }
+                    } else {
+                        console.warn('Non-fatal error:', data);
+                    }
+                });
+
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support (Safari)
+                video.src = streamUrl;
+                video.addEventListener('loadedmetadata', function() {
+                    showStatus('✅ Stream loaded successfully! (Native HLS)', 'success');
+                    video.play();
+                });
+                video.addEventListener('error', function() {
+                    showStatus('❌ Error loading stream', 'error');
+                });
+            } else {
+                showStatus('❌ Your browser does not support HLS playback', 'error');
+            }
+        }
+
+        function pauseStream() {
+            video.pause();
+        }
+
+        function resumeStream() {
+            video.play();
+        }
+
+        // Auto-load on page load if values are present
+        window.addEventListener('load', function() {
+            // Auto-detect and display server URL
+            const serverUrl = window.location.origin;
+            document.getElementById('serverUrl').value = serverUrl;
+            
+            const channelId = document.getElementById('channelId').value.trim();
+            if (channelId) {
+                showStatus('Ready to load stream. Click "Load Stream" button.', 'info');
+            }
+        });
+    </script>
+</body>
+</html>

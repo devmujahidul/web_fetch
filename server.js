@@ -8,6 +8,7 @@ const PORT = process.env.PORT || 3000;
 const DATA_URL = 'https://raw.githubusercontent.com/devmujahidul/Auto_Fetch/refs/heads/main/output.json';
 
 app.use(cors());
+app.use(express.static('public'));
 
 // Helper function to fetch with VLC headers
 async function fetchWithVLCHeaders(url) {
