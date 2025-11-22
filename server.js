@@ -15,7 +15,9 @@ async function fetchWithVLCHeaders(url) {
         headers: {
             'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',
             'Accept': '*/*',
-            'Connection': 'keep-alive'
+            'Connection': 'keep-alive',
+            'Origin': 'https://web.aynaott.com',
+            'Referer': 'https://web.aynaott.com/'
         },
         responseType: 'text'
     });
@@ -74,7 +76,8 @@ app.get('/get-stream/:id', async (req, res) => {
         const streamResponse = await fetchWithVLCHeaders(targetUrl);
 
         // 3. Rewrite M3U8 to proxy all requests through our server
-        const protocol = req.protocol;
+        // Always use HTTPS for Render deployment
+        const protocol = req.get('host').includes('localhost') ? req.protocol : 'https';
         const host = req.get('host');
         const proxyPath = `${protocol}://${host}`;
         
@@ -116,7 +119,8 @@ app.get('/proxy-m3u8', async (req, res) => {
         const streamResponse = await fetchWithVLCHeaders(decodedUrl);
         
         // Rewrite URLs in this M3U8 too
-        const protocol = req.protocol;
+        // Always use HTTPS for Render deployment
+        const protocol = req.get('host').includes('localhost') ? req.protocol : 'https';
         const host = req.get('host');
         const proxyPath = `${protocol}://${host}`;
         
@@ -152,7 +156,9 @@ app.get('/proxy-segment', async (req, res) => {
             headers: {
                 'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',
                 'Accept': '*/*',
-                'Connection': 'keep-alive'
+                'Connection': 'keep-alive',
+                'Origin': 'https://web.aynaott.com',
+                'Referer': 'https://web.aynaott.com/'
             },
             responseType: 'stream'
         });
