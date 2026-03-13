@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -5,7 +6,8 @@ const { URL } = require('url');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_URL = 'https://raw.githubusercontent.com/devmujahidul/Auto_Fetch/refs/heads/main/output.json';
+const DATA_URL = process.env.DATA_URL || 'https://api.github.com/repos/devmujahidul/Auto_Fetch/contents/output.json';
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
 app.use(cors());
 app.use(express.static('public'));
@@ -64,9 +66,19 @@ app.get('/get-stream/:id', async (req, res) => {
     const requestedId = req.params.id;
 
     try {
-        // 1. Get URL from JSON
-        const jsonResponse = await axios.get(DATA_URL);
-        const channel = jsonResponse.data.channels.find(item => item.id === requestedId);
+        // 1. Get URL from JSON fetched via GitHub API
+        const jsonResponse = await axios.get(DATA_URL, {
+            headers: {
+                Accept: 'application/vnd.github.v3.raw',
+                ...(GITHUB_TOKEN ? { Authorization: `token ${GITHUB_TOKEN}` } : {})
+            }
+        });
+
+        const jsonData = typeof jsonResponse.data === 'string'
+            ? JSON.parse(jsonResponse.data)
+            : jsonResponse.data;
+
+        const channel = jsonData.channels.find(item => item.id === requestedId);
 
         if (!channel) return res.status(404).send("Channel ID not found");
 
